@@ -15,6 +15,7 @@
 | game-user | 玩家资料 |
 | game-leaderboard | 排行榜 |
 | game-core | 玩法占位（clone 后在此写逻辑） |
+| *-migrate | 一次性 DbUp 迁移 Job（与对应服务同一镜像，`--migrate`） |
 
 Postgres `5433` · Redis `6380`（与 MP 隔离）
 
@@ -30,9 +31,26 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+启动顺序：postgres healthy → **migrate Jobs 依次成功** → 业务服务 → gateway。
+
 - 网关：http://localhost:8081
 - 健康检查：`GET /health`
 - 联调：`./scripts/smoke-test.sh`
+
+## 数据库迁移（统一规范）
+
+**禁止**在多副本 API 启动路径中直接跑 DbUp。统一使用「单镜像 + `--migrate`」：
+
+| 场景 | 命令 |
+|------|------|
+| 只跑某服务迁移 | `docker compose run --rm game-user-migrate` |
+| 本地无 Docker | `dotnet run --project src/Game.User -- --migrate` |
+| 正常启动 | `docker compose up -d`（自动先 migrate） |
+
+Program.cs 顶部识别 `--migrate` / `RUN_MIGRATION_ONLY=true`，迁移成功后直接退出，不启动 Web。  
+Compose 中业务服务通过 `depends_on: condition: service_completed_successfully` 等待对应 migrate Job。
+
+未来 K8s：migrate 服务可平替为 Job 或 InitContainer。
 
 ## API（模板内置）
 

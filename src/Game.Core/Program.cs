@@ -1,7 +1,35 @@
+using DbUp;
 using System.Text.Json.Serialization;
 using Game.Shared.Jwt;
 
 var builder = WebApplication.CreateSlimBuilder(args);
+
+
+// =================== 【迁移入口：--migrate 或 RUN_MIGRATION_ONLY=true】 ===================
+var runMigrationOnly = args.Contains("--migrate")
+    || string.Equals(Environment.GetEnvironmentVariable("RUN_MIGRATION_ONLY"), "true", StringComparison.OrdinalIgnoreCase);
+
+if (runMigrationOnly)
+{
+    var migrateConn = builder.Configuration.GetConnectionString("Postgres")
+        ?? throw new InvalidOperationException("缺少 ConnectionStrings__Postgres");
+    Console.WriteLine("Executing database migrations...");
+    var upgrader = DeployChanges.To
+        .PostgresqlDatabase(migrateConn)
+        .WithScriptsEmbeddedInAssembly(typeof(Program).Assembly)
+        .WithTransaction()
+        .LogToConsole()
+        .Build();
+    var result = upgrader.PerformUpgrade();
+    if (!result.Successful)
+    {
+        Console.Error.WriteLine($"DB migration failed: {result.Error}");
+        Environment.Exit(1);
+    }
+    Console.WriteLine("Migration completed successfully.");
+    return; // 只跑迁移，不启动 Web
+}
+// ========================================================================================
 
 builder.Services.ConfigureHttpJsonOptions(opts =>
 {

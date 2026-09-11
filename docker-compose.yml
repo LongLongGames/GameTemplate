@@ -27,6 +27,47 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # 一次性迁移 Job（各服务脚本可能不同，按需拆；模板默认以 game-user 承载主迁移）
+  game-user-migrate:
+    build:
+      context: .
+      dockerfile: src/Game.User/Dockerfile
+    command: ["--migrate"]
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  game-leaderboard-migrate:
+    build:
+      context: .
+      dockerfile: src/Game.Leaderboard/Dockerfile
+    command: ["--migrate"]
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      game-user-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  game-core-migrate:
+    build:
+      context: .
+      dockerfile: src/Game.Core/Dockerfile
+    command: ["--migrate"]
+    environment:
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      game-leaderboard-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
   game-user:
     build:
       context: .
@@ -41,6 +82,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      game-user-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   game-leaderboard:
@@ -57,6 +100,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      game-leaderboard-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   game-core:
@@ -64,8 +109,12 @@ services:
       context: .
       dockerfile: src/Game.Core/Dockerfile
     environment:
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
       Jwt__Secret: ${JWT_SECRET:-CHANGE_ME_TO_A_LONG_RANDOM_SECRET_IN_PRODUCTION}
       Jwt__Issuer: battle-net-mp
+    depends_on:
+      game-core-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   game-gateway:
