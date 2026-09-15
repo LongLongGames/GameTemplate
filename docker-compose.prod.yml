@@ -1,8 +1,10 @@
+# 生产：业务服务使用 GHCR 镜像（先 tag v* 触发 CI）。
+# clone 后将 image 中的仓库名换成你的 org/repo，并按端口公式改宿主机端口。
 services:
   postgres:
     image: postgres:16
     ports:
-      - "5433:5432"   # 本地模板端口；正式按 G 公式：13000+G*100+32
+      - "5433:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-game}
       POSTGRES_USER: ${POSTGRES_USER:-game}
@@ -18,8 +20,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6380:6379"   # 本地模板端口；正式：13000+G*100+79
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -28,9 +28,7 @@ services:
     restart: unless-stopped
 
   game-user-migrate:
-    build:
-      context: .
-      dockerfile: src/Game.User/Dockerfile
+    image: ghcr.io/longlonggames/gametemplate/game-user:${IMAGE_TAG:-latest}
     command: ["--migrate"]
     environment:
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
@@ -40,9 +38,7 @@ services:
     restart: "no"
 
   game-leaderboard-migrate:
-    build:
-      context: .
-      dockerfile: src/Game.Leaderboard/Dockerfile
+    image: ghcr.io/longlonggames/gametemplate/game-leaderboard:${IMAGE_TAG:-latest}
     command: ["--migrate"]
     environment:
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
@@ -54,9 +50,7 @@ services:
     restart: "no"
 
   game-core-migrate:
-    build:
-      context: .
-      dockerfile: src/Game.Core/Dockerfile
+    image: ghcr.io/longlonggames/gametemplate/game-core:${IMAGE_TAG:-latest}
     command: ["--migrate"]
     environment:
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
@@ -68,9 +62,7 @@ services:
     restart: "no"
 
   game-user:
-    build:
-      context: .
-      dockerfile: src/Game.User/Dockerfile
+    image: ghcr.io/longlonggames/gametemplate/game-user:${IMAGE_TAG:-latest}
     environment:
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
       ConnectionStrings__Redis: "redis:6379"
@@ -89,9 +81,7 @@ services:
     restart: unless-stopped
 
   game-leaderboard:
-    build:
-      context: .
-      dockerfile: src/Game.Leaderboard/Dockerfile
+    image: ghcr.io/longlonggames/gametemplate/game-leaderboard:${IMAGE_TAG:-latest}
     environment:
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
       ConnectionStrings__Redis: "redis:6379"
@@ -107,9 +97,7 @@ services:
     restart: unless-stopped
 
   game-core:
-    build:
-      context: .
-      dockerfile: src/Game.Core/Dockerfile
+    image: ghcr.io/longlonggames/gametemplate/game-core:${IMAGE_TAG:-latest}
     environment:
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-game};Username=${POSTGRES_USER:-game};Password=${POSTGRES_PASSWORD:-game_dev_pwd}"
       Jwt__Secret: ${JWT_SECRET:-CHANGE_ME_TO_A_LONG_RANDOM_SECRET_IN_PRODUCTION}
@@ -126,7 +114,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "8081:80"   # 本地模板；正式：13000+G*100+80
+      - "8081:80"
     depends_on:
       - game-user
       - game-leaderboard

@@ -1,6 +1,6 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using DbUp;
+using Game.Shared.Config;
 using Game.Shared.Jwt;
 using Npgsql;
 
@@ -47,6 +47,11 @@ var connStr = builder.Configuration.GetConnectionString("Postgres")
 builder.Services.AddSingleton(new SimpleJwt(jwtSecret, jwtIssuer));
 builder.Services.AddSingleton(new NpgsqlDataSourceBuilder(connStr).Build());
 
+var configRoot = GameConfigStore.ResolveConfigRoot(
+    builder.Configuration["Config:Root"] ?? builder.Configuration["Config__Root"]);
+var gameConfig = GameConfigStore.Load(configRoot);
+builder.Services.AddSingleton(gameConfig);
+
 var app = builder.Build();
 
 // 正常启动路径不再执行迁移。由 *-migrate Job 或 --migrate 完成。
@@ -70,11 +75,8 @@ app.MapGet("/api/v1/user/profile", async (HttpContext ctx, SimpleJwt jwt, Npgsql
 
     await using var reader = await cmd.ExecuteReaderAsync();
     if (await reader.ReadAsync())
-    {
         return Results.Ok(ReadProfile(reader));
-    }
 
-    // 不存在则自动创建
     await reader.CloseAsync();
     await using var insert = new NpgsqlCommand("""
         INSERT INTO player_profiles (mp_account_id, game_id, nickname)
@@ -83,7 +85,7 @@ app.MapGet("/api/v1/user/profile", async (HttpContext ctx, SimpleJwt jwt, Npgsql
         """, conn);
     insert.Parameters.AddWithValue("mp", Guid.Parse(claims.Sub));
     insert.Parameters.AddWithValue("gid", game_id);
-    insert.Parameters.AddWithValue("nick", "Player_" + claims.Sub[..8]);
+    insert.Parameters.AddWithValue("nick", "Player_" + claims.Sub[..Math.Min(8, claims.Sub.Length)]);
 
     await using var r2 = await insert.ExecuteReaderAsync();
     await r2.ReadAsync();
@@ -97,12 +99,12 @@ app.MapPut("/api/v1/user/profile", async (HttpContext ctx, SimpleJwt jwt, Npgsql
         return Results.Unauthorized();
 
     if (string.IsNullOrWhiteSpace(body.GameId))
-        return Results.BadRequest(new { error = "game_id required" });
+        return Results.Json(new ErrorResponse("game_id required"), AppJsonContext.Default.ErrorResponse, statusCode: StatusCodes.Status400BadRequest);
 
     await using var conn = await ds.OpenConnectionAsync();
     await using var cmd = new NpgsqlCommand("""
         INSERT INTO player_profiles (mp_account_id, game_id, nickname, level, extra_json, updated_at)
-        VALUES (@mp, @gid, @nick, @lv, @extra::jsonb, NOW())
+        VALUES (@mp, @gid, @nick, COALESCE(@lv, 1), COALESCE(@extra::jsonb, '{}'::jsonb), NOW())
         ON CONFLICT (mp_account_id, game_id) DO UPDATE SET
             nickname = COALESCE(NULLIF(@nick, ''), player_profiles.nickname),
             level = COALESCE(@lv, player_profiles.level),
@@ -143,7 +145,13 @@ static ProfileResponse ReadProfile(NpgsqlDataReader r) => new(
     r.GetDateTime(7)
 );
 
-public sealed record HealthResponse(string Status, string Service);
+public sealed record ErrorResponse(
+    [property: JsonPropertyName("error")] string Error);
+
+public sealed record HealthResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("service")] string Service);
+
 public sealed record ProfileResponse(
     [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("mp_account_id")] string MpAccountId,
@@ -153,12 +161,14 @@ public sealed record ProfileResponse(
     [property: JsonPropertyName("extra_json")] string ExtraJson,
     [property: JsonPropertyName("created_at")] DateTime CreatedAt,
     [property: JsonPropertyName("updated_at")] DateTime UpdatedAt);
+
 public sealed record UpdateProfileRequest(
     [property: JsonPropertyName("game_id")] string GameId,
     [property: JsonPropertyName("nickname")] string? Nickname,
     [property: JsonPropertyName("level")] int? Level,
     [property: JsonPropertyName("extra_json")] string? ExtraJson);
 
+[JsonSerializable(typeof(ErrorResponse))]
 [JsonSerializable(typeof(HealthResponse))]
 [JsonSerializable(typeof(ProfileResponse))]
 [JsonSerializable(typeof(UpdateProfileRequest))]
